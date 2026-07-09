@@ -131,7 +131,7 @@ def answer_image(request: ImageRequest):
                 "parts": [
                     {
                         "inline_data": {
-                            "mime_type": image/png,
+                            "mime_type": "image/png",
                             "data": request.image_base64,
                         }
                     },
