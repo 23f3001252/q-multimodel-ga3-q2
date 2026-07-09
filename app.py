@@ -50,8 +50,6 @@ def home():
     }
 
 
-import re
-
 def clean_answer(text: str) -> str:
     """
     Clean Gemini response while preserving text answers.
@@ -127,13 +125,13 @@ def answer_image(request: ImageRequest):
        - Do not add punctuation.
     """
 
-   payload = {
+    payload = {
         "contents": [
             {
                 "parts": [
                     {
                         "inline_data": {
-                            "mime_type": mime,
+                            "mime_type": image/png,
                             "data": request.image_base64,
                         }
                     },
