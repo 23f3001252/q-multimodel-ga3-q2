@@ -17,29 +17,88 @@ if not GEMINI_API_KEY:
 
 app = FastAPI()
 
+# ===== CORS: allow any origin =====
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
+
 @app.get("/")
 def home():
     return "This is ga3-q2-tds-q-multimodel-image"
 
-import re
 
 def clean_answer(text: str) -> str:
-    # Remove common prefixes
+    """
+    Clean the model's answer to:
+    - Always return a string.
+    - For numeric answers, return only the number, e.g. "4089.35".
+    - Remove units, currency symbols, and extra text where possible.
+    """
     text = text.strip()
-    text = re.sub(r"^(the total|total|answer|value)[:\s]*", "", text.lower())
-    text = re.sub(r"[^0-9.]", "", text)  # keep only digits and '.'
-    text = text.strip(".")
-    return text
+
+    # Remove common prefixes like "The total is", "Answer:", etc.
+    text = re.sub(r"^(the total|total|answer|value|max|maximum)[:\s]*", "", text.lower())
+
+    # Remove units and currency symbols
+    text = re.sub(r"\s*(usd|dollars|rs|₹|%|€|£|inr)\b", "", text, flags=re.IGNORECASE)
+
+    # If the answer is clearly a category name (for pie chart), return it as-is
+    # But still strip leading/trailing punctuation and "the " prefix
+    text = text.strip(".,:;!?\"'")
+    text = re.sub(r"^the\s+", "", text, flags=re.IGNORECASE)
+
+    # If it looks numeric, clean it to just digits and '.'
+    # Check if it contains digits
+    if re.search(r"\d", text):
+        # Keep only digits, '.', commas (for thousand separators), and minus
+        cleaned = re.sub(r"[^0-9.,\-]", "", text)
+        # Remove commas used as thousand separators
+        cleaned = cleaned.replace(",", "")
+        # Strip leading/trailing dots
+        cleaned = cleaned.strip(".")
+        if cleaned:
+            return cleaned
+
+    # Otherwise, return the cleaned text (for non-numeric answers like category names)
+    return text.strip()
+
 
 @app.post("/answer-image")
 def answer_image(request: dict):
-    image_base64 = request["image_base64"]
-    question = request["question"]
+    """
+    Request:
+    {
+      "image_base64": "iVBORw0KG...",
+      "question": "What is the total?"
+    }
 
-    strong_question = (
-        f"Extract the requested value from this image. Return only the number, "
-        f"with no currency symbol, no units, and no extra text. For example: 4089.35. "
-        f"Question: {question}"
+    Response:
+    {
+      "answer": "4089.35"
+    }
+    """
+    image_base64 = request["image_base64"]
+    question = request["question"].strip()
+
+    # Build a strong prompt that matches the sample image types:
+    # - pie_chart: category name
+    # - invoice: numeric total
+    # - data_table: numeric value (e.g. max score)
+    prompt = (
+        f"Look at this image and answer the following question. "
+        f"Question: {question}\n\n"
+        f"Rules for your answer:\n"
+        f"1. Always return your answer as a string.\n"
+        f"2. If the answer is a number (e.g. total amount, max score), return ONLY the number "
+        f"with no currency symbol, no units, and no extra text. Example: 4089.35, 95, 12.5.\n"
+        f"3. If the answer is a text label (e.g. category name like 'Housing'), return ONLY that label "
+        f"without 'the' or extra words. Example: Housing, Food, Transport.\n"
+        f"4. Do not include any explanation, just the raw answer value."
     )
 
     payload = {
@@ -54,7 +113,7 @@ def answer_image(request: dict):
                         }
                     },
                     {
-                        "text": strong_question
+                        "text": prompt
                     }
                 ]
             }
@@ -70,6 +129,7 @@ def answer_image(request: dict):
     resp = requests.post(url, headers=headers, json=payload)
     resp_json = resp.json()
 
+    # Extract text answer from Gemini
     try:
         text_answer = resp_json["candidates"][0]["content"]["parts"][0]["text"]
     except Exception:
