@@ -140,7 +140,6 @@ Rules:
                 "parts": [
                     {
                         "inline_data": {
-                            "mime_type": mime,
                             "data": request.image_base64,
                         }
                     },
