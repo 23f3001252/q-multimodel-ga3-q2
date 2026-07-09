@@ -1,6 +1,5 @@
 import os
 import base64
-import imghdr
 import re
 import requests
 
@@ -115,21 +114,6 @@ def answer_image(request: ImageRequest):
     except Exception:
         return {"answer": ""}
 
-    # -----------------------------------
-    # Detect MIME Type
-    # -----------------------------------
-    image_type = imghdr.what(None, image_bytes)
-
-    mime = "image/png"
-
-    if image_type in ["jpeg", "jpg"]:
-        mime = "image/jpeg"
-
-    elif image_type == "webp":
-        mime = "image/webp"
-
-    elif image_type == "gif":
-        mime = "image/gif"
 
     question = request.question.strip()
 
