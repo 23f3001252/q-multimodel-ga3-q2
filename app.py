@@ -17,37 +17,31 @@ if not GEMINI_API_KEY:
 
 app = FastAPI()
 
-# ===== CORS: allow any origin =====
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=["*"],
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
-
 @app.get("/")
 def home():
     return "This is ga3-q2-tds-q-multimodel-image"
 
+import re
+
+def clean_answer(text: str) -> str:
+    # Remove common prefixes
+    text = text.strip()
+    text = re.sub(r"^(the total|total|answer|value)[:\s]*", "", text.lower())
+    text = re.sub(r"[^0-9.]", "", text)  # keep only digits and '.'
+    text = text.strip(".")
+    return text
+
 @app.post("/answer-image")
 def answer_image(request: dict):
-    """
-    Request:
-    {
-      "image_base64": "iVBORw0KG...",
-      "question": "What is the total?"
-    }
-
-    Response:
-    {
-      "answer": "4089.35"
-    }
-    """
     image_base64 = request["image_base64"]
     question = request["question"]
 
-    # Prepare Gemini payload
+    strong_question = (
+        f"Extract the requested value from this image. Return only the number, "
+        f"with no currency symbol, no units, and no extra text. For example: 4089.35. "
+        f"Question: {question}"
+    )
+
     payload = {
         "contents": [
             {
@@ -60,14 +54,13 @@ def answer_image(request: dict):
                         }
                     },
                     {
-                        "text": question
+                        "text": strong_question
                     }
                 ]
             }
         ]
     }
 
-    # Call Gemini API
     url = (
         f"https://generativelanguage.googleapis.com/v1beta/models/"
         f"{GEMINI_MODEL}:generateContent?key={GEMINI_API_KEY}"
@@ -77,12 +70,13 @@ def answer_image(request: dict):
     resp = requests.post(url, headers=headers, json=payload)
     resp_json = resp.json()
 
-    # Extract text answer
     try:
-        text_answer = resp_json["candidates"]["content"]["parts"]["text"]
+        text_answer = resp_json["candidates"][0]["content"]["parts"][0]["text"]
     except Exception:
         text_answer = "Error: could not parse model response."
 
-    answer = text_answer.strip()
+    answer = clean_answer(text_answer)
+    if not answer:
+        answer = text_answer.strip()  # fallback to raw text if cleaning removes everything
 
     return {"answer": answer}
