@@ -50,55 +50,40 @@ def home():
     }
 
 
-# ==========================================================
-# Clean Gemini Output
-# ==========================================================
+import re
+
 def clean_answer(text: str) -> str:
     """
-    Cleans Gemini response.
+    Clean Gemini response while preserving text answers.
 
-    Numeric answers:
-        "$4,089.35"
-        -> "4089.35"
+    Numeric examples:
+        "$4,089.35" -> "4089.35"
+        "95%" -> "95"
 
-    Text answers:
-        "The answer is Housing."
-        -> "Housing"
+    Text examples:
+        "Housing" -> "Housing"
+        "Office Supplies" -> "Office Supplies"
     """
+    text = text.strip().strip('"').strip("'")
 
-    text = text.strip()
-
-    # Remove common prefixes (case insensitive)
+    # Remove common prefixes
     text = re.sub(
-        r"^(the total|total|answer|value|max|maximum|the answer is)[:\s]*",
+        r"^(Answer:|The answer is|Total:|Grand Total:)\s*",
         "",
         text,
         flags=re.IGNORECASE,
     )
 
-    # Remove currency and units
-    text = re.sub(
-        r"(USD|INR|Rs\.?|₹|\$|€|£|dollars?|rupees?|%)",
-        "",
+    # If the whole response is basically a number (with optional currency/unit)
+    match = re.fullmatch(
+        r"\s*[$₹€£]?\s*(-?\d[\d,]*(?:\.\d+)?)\s*[%A-Za-z]*\s*",
         text,
-        flags=re.IGNORECASE,
     )
 
-    text = text.strip(" .,:;!?\"'")
-
-    # Numeric answer
-    if re.search(r"\d", text):
-
-        cleaned = re.sub(r"[^0-9.,\-]", "", text)
-
-        cleaned = cleaned.replace(",", "")
-
-        cleaned = cleaned.strip(".")
-
-        return cleaned
+    if match:
+        return match.group(1).replace(",", "")
 
     return text
-
 
 # ==========================================================
 # Main Endpoint
@@ -118,28 +103,37 @@ def answer_image(request: ImageRequest):
     question = request.question.strip()
 
     prompt = f"""
-You are an OCR and document understanding assistant.
+    You are an expert OCR and document understanding assistant.
+    
+    Read the image carefully and answer ONLY the user's question.
+    
+    Question:
+    {question}
+    
+    Rules:
+    1. Return ONLY the answer.
+    2. Do NOT explain your reasoning.
+    3. Do NOT write complete sentences.
+    4. If the answer is numeric:
+       - Return only the number.
+       - Remove currency symbols.
+       - Remove commas used as thousand separators.
+       - Remove units.
+       Example:
+       4089.35
+    5. If the answer is text:
+       - Return only the exact text from the image.
+       - Preserve capitalization and spelling.
+       - Do not add punctuation.
+    """
 
-Answer ONLY the user's question.
-
-Question:
-{question}
-
-Rules:
-- Return ONLY the answer.
-- Do NOT explain.
-- If the answer is numeric, return only the number.
-- Remove currency symbols and units.
-- Preserve capitalization for text answers.
-- Do not add punctuation.
-"""
-
-    payload = {
+   payload = {
         "contents": [
             {
                 "parts": [
                     {
                         "inline_data": {
+                            "mime_type": mime,
                             "data": request.image_base64,
                         }
                     },
@@ -148,7 +142,13 @@ Rules:
                     },
                 ]
             }
-        ]
+        ],
+        "generationConfig": {
+            "temperature": 0,
+            "topP": 0.1,
+            "topK": 1,
+            "maxOutputTokens": 32,
+        },
     }
 
     url = (
@@ -177,10 +177,9 @@ Rules:
     # -----------------------------------
     try:
         text_answer = (
-            result["candidates"][0]["content"]["parts"][0]["text"]
+            result["candidates"][0]["content"]["parts"][0]["text"].strip()
         )
-
-    except Exception:
+    except (KeyError, IndexError, TypeError):
         return {"answer": ""}
 
     answer = clean_answer(text_answer)
